@@ -21,6 +21,7 @@ class ModelArtifacts:
 @dataclass(frozen=True)
 class FeatureSpec:
     name: str
+    display_name: str
     kind: str
     default_value: Any
     min_value: float | None
@@ -46,6 +47,27 @@ def resolve_data_path(
 
     candidates = [candidate_dir / filename for filename in preferred_filenames for candidate_dir in candidate_dirs]
     return next((path for path in candidates if path.exists()), candidates[0])
+
+
+def read_feature_display_names(path: Path) -> dict[str, str]:
+    raw = pd.read_excel(path, header=None, nrows=2)
+    if raw.shape[0] < 2 or raw.shape[1] == 0:
+        return {}
+
+    first_cell = str(raw.iloc[0, 0]).strip()
+    second_cell = str(raw.iloc[1, 0]).strip()
+    if first_cell != "原来" or second_cell != "现在":
+        return {}
+
+    labels: dict[str, str] = {}
+    for old_name, display_name in zip(raw.iloc[0].tolist(), raw.iloc[1].tolist()):
+        if pd.isna(old_name) or pd.isna(display_name):
+            continue
+        old = str(old_name).strip()
+        display = str(display_name).strip()
+        if old and display:
+            labels[old] = display
+    return labels
 
 
 def _read_metadata(path: Path) -> dict[str, Any]:
@@ -97,14 +119,21 @@ def _is_categorical_series(series: pd.Series) -> bool:
     return True
 
 
-def infer_feature_specs(*, df: pd.DataFrame, feature_cols: list[str]) -> list[FeatureSpec]:
+def infer_feature_specs(
+    *,
+    df: pd.DataFrame,
+    feature_cols: list[str],
+    feature_display_names: dict[str, str] | None = None,
+) -> list[FeatureSpec]:
     missing = [c for c in feature_cols if c not in df.columns]
     if missing:
         raise ValueError(f"Missing feature columns in dataframe: {missing}")
 
     specs: list[FeatureSpec] = []
+    display_names = feature_display_names or {}
     for col in feature_cols:
         s = df[col]
+        display_name = display_names.get(col, col)
         if _is_categorical_series(s):
             raw_choices = s.dropna().unique().tolist()
             choices = sorted(raw_choices)
@@ -112,6 +141,7 @@ def infer_feature_specs(*, df: pd.DataFrame, feature_cols: list[str]) -> list[Fe
             specs.append(
                 FeatureSpec(
                     name=col,
+                    display_name=display_name,
                     kind="categorical",
                     default_value=default,
                     min_value=None,
@@ -135,6 +165,7 @@ def infer_feature_specs(*, df: pd.DataFrame, feature_cols: list[str]) -> list[Fe
             specs.append(
                 FeatureSpec(
                     name=col,
+                    display_name=display_name,
                     kind="numeric",
                     default_value=default,
                     min_value=min_v,
