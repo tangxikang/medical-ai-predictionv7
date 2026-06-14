@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import tempfile
+from html import escape
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +19,13 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from ml_project.cleaning import clean_dataset
-from ml_project.web_support import FeatureSpec, infer_feature_specs, resolve_latest_model_artifacts
+from ml_project.web_support import (
+    FeatureSpec,
+    infer_feature_specs,
+    read_feature_display_names,
+    resolve_data_path,
+    resolve_latest_model_artifacts,
+)
 
 
 st.set_page_config(page_title="Medical AI Prediction", layout="wide", page_icon="馃┖")
@@ -107,9 +114,14 @@ def _load_data(data_path: str, file_mtime_ns: int) -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
-def _get_feature_specs(data_path: str, features: tuple[str, ...], file_mtime_ns: int) -> list[FeatureSpec]:
+def _get_feature_specs(
+    data_path: str,
+    features: tuple[str, ...],
+    feature_display_names: dict[str, str],
+    file_mtime_ns: int,
+) -> list[FeatureSpec]:
     df = _load_data(data_path, file_mtime_ns)
-    return infer_feature_specs(df=df, feature_cols=list(features))
+    return infer_feature_specs(df=df, feature_cols=list(features), feature_display_names=feature_display_names)
 
 
 def _render_inputs(specs: list[FeatureSpec]) -> pd.DataFrame:
@@ -119,9 +131,11 @@ def _render_inputs(specs: list[FeatureSpec]) -> pd.DataFrame:
         col = cols[i % 3]
         with col:
             # Truncate long names for display; show full name on hover via HTML title
-            display_name = spec.name if len(spec.name) <= 25 else spec.name[:22] + "..."
+            display_name = spec.display_name if len(spec.display_name) <= 25 else spec.display_name[:22] + "..."
+            escaped_display_name = escape(display_name)
+            escaped_title = escape(spec.display_name)
             st.markdown(
-                f'<span title="{spec.name}" style="font-size:14px; font-weight:600; cursor:help; display:block; margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{display_name}</span>',
+                f'<span title="{escaped_title}" style="font-size:14px; font-weight:600; cursor:help; display:block; margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{escaped_display_name}</span>',
                 unsafe_allow_html=True,
             )
             if spec.kind == "categorical":
@@ -157,6 +171,7 @@ def _build_force_plot_html(
     input_df: pd.DataFrame,
     background_df: pd.DataFrame,
     selected_features: list[str],
+    feature_display_names: dict[str, str],
 ) -> str:
     pre = pipeline.named_steps["preprocess"]
     model = pipeline.named_steps["model"]
@@ -172,11 +187,12 @@ def _build_force_plot_html(
     base_values = np.asarray(exp.base_values)
     base_value = float(base_values[0]) if base_values.ndim > 0 else float(base_values)
     display_values = [input_df.iloc[0][name] if name in input_df.columns else "" for name in agg_names]
+    shap_feature_names = [feature_display_names.get(name, name) for name in agg_names]
     force_html = shap.plots.force(
         base_value=base_value,
         shap_values=agg_values[0],
         features=display_values,
-        feature_names=agg_names,
+        feature_names=shap_feature_names,
         matplotlib=False,
     ).html()
     return f"<head>{shap.getjs()}</head><body>{force_html}</body>"
@@ -186,19 +202,19 @@ st.title("Medical AI Prediction Web")
 
 artifact_extra_dirs = [ROOT.parent] if ROOT.parent != ROOT else []
 artifacts = resolve_latest_model_artifacts(base_dir=ROOT, extra_base_dirs=artifact_extra_dirs)
-data_candidates = [
-    ROOT / "data.xlsx",
-    ROOT / "新版本数据.xlsx",
-    ROOT.parent / "data.xlsx",
-    ROOT.parent / "新版本数据.xlsx",
-]
-data_path = next((p for p in data_candidates if p.exists()), data_candidates[0])
+data_path = resolve_data_path(base_dir=ROOT, extra_base_dirs=artifact_extra_dirs)
 
 try:
     pipeline = _load_model(str(artifacts.model_path))
     data_mtime_ns = data_path.stat().st_mtime_ns
     data_df = _load_data(str(data_path), data_mtime_ns)
-    specs = _get_feature_specs(str(data_path), tuple(artifacts.selected_features), data_mtime_ns)
+    feature_display_names = read_feature_display_names(data_path)
+    specs = _get_feature_specs(
+        str(data_path),
+        tuple(artifacts.selected_features),
+        feature_display_names,
+        data_mtime_ns,
+    )
 except Exception as exc:
     st.error(f"加载失败: {exc}")
     st.stop()
@@ -221,6 +237,7 @@ if st.button("开始预测", type="primary", use_container_width=True):
             input_df=input_df,
             background_df=bg,
             selected_features=artifacts.selected_features,
+            feature_display_names=feature_display_names,
         )
         with tempfile.NamedTemporaryFile(delete=False, suffix=".html") as tmp:
             tmp.write(html.encode("utf-8"))
