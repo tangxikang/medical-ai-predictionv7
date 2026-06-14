@@ -27,6 +27,24 @@ class FeatureSpec:
     min_value: float | None
     max_value: float | None
     choices: list[Any] | None
+    choice_values: list[Any] | None
+
+
+_PSS_CHOICES = ["Never", "Almost never", "Sometimes", "Fairly often", "Very often"]
+_PSS_FORWARD_VALUES = [0, 1, 2, 3, 4]
+_PSS_REVERSE_VALUES = [4, 3, 2, 1, 0]
+_GAD_PHQ_CHOICES = ["Not at all", "Several days", "More than half the days", "Nearly every day"]
+_GAD_PHQ_VALUES = [0, 1, 2, 3]
+
+
+def _scale_choice_spec(column_name: str) -> tuple[list[str], list[int]] | None:
+    if column_name.startswith("PSS_Q"):
+        if column_name in {f"PSS_Q{i}" for i in (8, 9, 10)}:
+            return _PSS_CHOICES, _PSS_REVERSE_VALUES
+        return _PSS_CHOICES, _PSS_FORWARD_VALUES
+    if column_name.startswith(("GAD_Q", "PHQ_Q")):
+        return _GAD_PHQ_CHOICES, _GAD_PHQ_VALUES
+    return None
 
 
 def resolve_data_path(
@@ -134,7 +152,22 @@ def infer_feature_specs(
     for col in feature_cols:
         s = df[col]
         display_name = display_names.get(col, col)
-        if _is_categorical_series(s):
+        scale_choices = _scale_choice_spec(col)
+        if scale_choices is not None:
+            choices, values = scale_choices
+            specs.append(
+                FeatureSpec(
+                    name=col,
+                    display_name=display_name,
+                    kind="categorical",
+                    default_value=choices[0],
+                    min_value=None,
+                    max_value=None,
+                    choices=list(choices),
+                    choice_values=list(values),
+                )
+            )
+        elif _is_categorical_series(s):
             raw_choices = s.dropna().unique().tolist()
             choices = sorted(raw_choices)
             default = choices[0] if choices else ""
@@ -147,6 +180,7 @@ def infer_feature_specs(
                     min_value=None,
                     max_value=None,
                     choices=choices,
+                    choice_values=None,
                 )
             )
         else:
@@ -171,6 +205,7 @@ def infer_feature_specs(
                     min_value=min_v,
                     max_value=max_v,
                     choices=None,
+                    choice_values=None,
                 )
             )
     return specs
