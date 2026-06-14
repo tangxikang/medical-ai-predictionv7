@@ -28,6 +28,26 @@ class FeatureSpec:
     choices: list[Any] | None
 
 
+def resolve_data_path(
+    *,
+    base_dir: Path,
+    extra_base_dirs: list[Path] | None = None,
+    preferred_filenames: tuple[str, ...] = ("新版本数据.xlsx", "data.xlsx"),
+) -> Path:
+    search_dirs = [base_dir, *(extra_base_dirs or [])]
+    candidate_dirs = []
+    seen_dirs: set[Path] = set()
+    for search_dir in search_dirs:
+        for candidate_dir in (search_dir, search_dir / "data"):
+            resolved = candidate_dir.resolve()
+            if resolved not in seen_dirs:
+                candidate_dirs.append(candidate_dir)
+                seen_dirs.add(resolved)
+
+    candidates = [candidate_dir / filename for filename in preferred_filenames for candidate_dir in candidate_dirs]
+    return next((path for path in candidates if path.exists()), candidates[0])
+
+
 def _read_metadata(path: Path) -> dict[str, Any]:
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
