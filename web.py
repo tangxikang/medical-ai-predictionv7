@@ -130,12 +130,10 @@ def _render_inputs(specs: list[FeatureSpec]) -> pd.DataFrame:
     for i, spec in enumerate(specs):
         col = cols[i % 3]
         with col:
-            # Truncate long names for display; show full name on hover via HTML title
-            display_name = spec.display_name if len(spec.display_name) <= 25 else spec.display_name[:22] + "..."
-            escaped_display_name = escape(display_name)
+            escaped_display_name = escape(spec.display_name)
             escaped_title = escape(spec.display_name)
             st.markdown(
-                f'<span title="{escaped_title}" style="font-size:14px; font-weight:600; cursor:help; display:block; margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{escaped_display_name}</span>',
+                f'<span title="{escaped_title}" style="font-size:14px; font-weight:600; cursor:help; display:block; margin-bottom:4px; white-space:normal; overflow-wrap:anywhere; line-height:1.25;">{escaped_display_name}</span>',
                 unsafe_allow_html=True,
             )
             if spec.kind == "categorical":
