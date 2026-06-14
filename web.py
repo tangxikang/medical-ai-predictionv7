@@ -28,7 +28,9 @@ from ml_project.web_support import (
 )
 
 
-st.set_page_config(page_title="Medical AI Prediction", layout="wide", page_icon="馃┖")
+APP_TITLE = "Early Recognition Model of Shift Work Disorder Among Nurses"
+
+st.set_page_config(page_title=APP_TITLE, layout="wide", page_icon="SWD")
 
 st.markdown(
     """
@@ -139,13 +141,17 @@ def _render_inputs(specs: list[FeatureSpec]) -> pd.DataFrame:
             if spec.kind == "categorical":
                 choices = spec.choices or [spec.default_value]
                 default_idx = choices.index(spec.default_value) if spec.default_value in choices else 0
-                row[spec.name] = st.selectbox(
+                selected_choice = st.selectbox(
                     "",
                     choices,
                     index=default_idx,
                     key=f"input_{spec.name}",
                     label_visibility="collapsed",
                 )
+                if spec.choice_values is not None and selected_choice in choices:
+                    row[spec.name] = spec.choice_values[choices.index(selected_choice)]
+                else:
+                    row[spec.name] = selected_choice
             else:
                 min_v = float(spec.min_value if spec.min_value is not None else 0.0)
                 max_v = float(spec.max_value if spec.max_value is not None else 1.0)
@@ -196,7 +202,7 @@ def _build_force_plot_html(
     return f"<head>{shap.getjs()}</head><body>{force_html}</body>"
 
 
-st.title("Medical AI Prediction Web")
+st.title(APP_TITLE)
 
 artifact_extra_dirs = [ROOT.parent] if ROOT.parent != ROOT else []
 artifacts = resolve_latest_model_artifacts(base_dir=ROOT, extra_base_dirs=artifact_extra_dirs)
@@ -214,17 +220,17 @@ try:
         data_mtime_ns,
     )
 except Exception as exc:
-    st.error(f"加载失败: {exc}")
+    st.error(f"Failed to load model resources: {exc}")
     st.stop()
 
-st.subheader("输入特征")
+st.subheader("Input Features")
 input_df = _render_inputs(specs)
-if st.button("开始预测", type="primary", use_container_width=True):
+if st.button("Start Prediction", type="primary", use_container_width=True):
     proba = float(pipeline.predict_proba(input_df[artifacts.selected_features])[0, 1])
     threshold = artifacts.best_threshold if artifacts.best_threshold is not None else 0.5
     pred = int(proba >= float(threshold))
-    st.metric("预测概率(正类)", f"{proba:.2%}")
-    st.metric("分类结果", f"{pred} (阈值 {threshold:.3f})")
+    st.metric("Predicted Probability (Positive Class)", f"{proba:.2%}")
+    st.metric("Classification Result", f"{pred} (threshold {threshold:.3f})")
 
     st.markdown("---")
     st.subheader("SHAP Force Plot")
@@ -243,4 +249,4 @@ if st.button("开始预测", type="primary", use_container_width=True):
         components.html(tmp_path.read_text(encoding="utf-8"), height=380, scrolling=True)
         tmp_path.unlink(missing_ok=True)
     except Exception as exc:
-        st.warning(f"SHAP 图生成失败: {exc}")
+        st.warning(f"Failed to generate SHAP plot: {exc}")
